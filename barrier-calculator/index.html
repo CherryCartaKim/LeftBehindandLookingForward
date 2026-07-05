@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Barrier Calculator — Cumulative Weight Tool</title>
+
+<!--
+  BARRIER CALCULATOR -- v3, restructured into 3 steps (all content/logic
+  from v2 kept intact, just reorganized into a wizard flow):
+    Step 1: Pathway selection (+ explanation)
+    Step 2: Barrier selection (+ live synergy detection + preview score)
+    Step 3: Result (random life event + final score + breakdown + links)
+  Each step has its own Confirm button; the sticky bottom panel swaps
+  which button/meter it shows depending on the current step.
+
+  Same assumptions as v2 (10 barriers not 9, "Spatial Mismatch" mapped to
+  Transit, math is straight subtraction with everything stacking, one
+  random life event unions its barriers into the active set, no
+  quadruple synergy was specified in the source spec so none exists here).
+
+  Still a plain <script> tag for review -- Figma-Sites-safe conversion
+  is a separate step once this flow is confirmed.
+  -->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Tiffin+Sans:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --color-primary: #f49405;
+    --color-black: #1a1a1a;
+    --color-white: #ffffff;
+    --color-gray-line: rgba(26, 26, 26, 0.15);
+    --color-gray-text: #6b6b6b;
+    --color-primary-tint: rgba(244, 148, 5, 0.15);
+
+    --font-header: 'Tiffin Sans', 'Georgia', serif;
+    --font-body: 'Source Serif 4', 'Georgia', serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--color-white);
+    color: var(--color-black);
+    font-family: var(--font-body);
+    font-size: 18px;
+    line-height: 1.4;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 56px 48px;
+  }
+
+  .calc { width: 100%; max-width: 1400px; margin: 0 auto; }
+
+  .narrow-wrap { max-width: 720px; margin: 0 auto; padding: 20px 20px 20px; }
+
+  .calc h1 { font-family: var(--font-header); font-size: 18px; font-weight: 700; margin: 0 0 8px; }
+  .calc h2 { font-family: var(--font-header); font-size: 18px; font-weight: 700; margin: 0 0 8px; }
+
+  .calc__intro { color: var(--color-gray-text); max-width: 560px; margin-bottom: 20px; }
+
+  .calc__section-label {
+    font-family: var(--font-header); font-size: 18px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--color-gray-text); margin-bottom: 8px;
+  }
+
+  .step-indicator {
+    font-family: var(--font-header); font-size: 18px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--color-primary); margin-bottom: 12px;
+  }
+
+  .step { display: none; }
+  .step.is-active { display: block; }
+
+  /* ---- Step 1: Pathway selection ---- */
+
+  .pathway-page { max-width: 1400px; margin: 0 auto; padding: 24px 32px 32px; }
+
+  .pathway-heading-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding-bottom: 12px; margin-bottom: 24px; border-bottom: 1px solid var(--color-black);
+  }
+  .pathway-heading { font-family: var(--font-body); font-size: 18px; }
+
+  .pathway-next-btn {
+    width: 0; height: 0; padding: 0; margin: 0; cursor: pointer;
+    background: none;
+    border-top: 10px solid transparent;
+    border-bottom: 10px solid transparent;
+    border-left: 14px solid var(--color-primary);
+    border-right: 0;
+    visibility: hidden;
+  }
+  .pathway-next-btn.is-visible { visibility: visible; }
+
+  .pathway-back-btn {
+    width: 0; height: 0; padding: 0; margin: 0; cursor: pointer;
+    background: none;
+    border-top: 10px solid transparent;
+    border-bottom: 10px solid transparent;
+    border-right: 14px solid var(--color-primary);
+    border-left: 0;
+  }
+
+  .pathway-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr);
+    row-gap: 28px; column-gap: 60px;
+  }
+
+  .pathway-option { cursor: pointer; }
+  .pathway-option__row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .pathway-option__box {
+    font-family: 'Courier New', Courier, monospace; font-size: 18px; letter-spacing: 1px;
+    display: inline-flex; align-items: center; gap: 4px; color: var(--color-black);
+  }
+  .pathway-option__box .dot {
+    display: inline-block; width: 11px; height: 11px; border-radius: 50%;
+  }
+  .pathway-option.is-selected .pathway-option__box .dot { background: var(--color-primary); }
+  .pathway-option__label { font-family: var(--font-body); font-size: 18px; }
+  .pathway-option__summary { font-size: 18px; color: var(--color-black); max-width: 460px; margin: 0; }
+
+  /* ---- Step 2: Barrier selection ---- */
+
+  .barrier-page { position: relative; max-width: 1400px; margin: 0 auto; padding: 24px 32px 32px; }
+
+  .barrier-columns {
+    display: grid; grid-template-columns: 160px 1fr 1px 340px;
+    column-gap: 32px; align-items: stretch; margin-bottom: 24px;
+  }
+
+  .barrier-left-label { align-self: center; font-size: 18px; color: var(--color-black); white-space: nowrap; }
+
+  .barrier-list { display: flex; flex-direction: column; }
+  .barrier-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; cursor: pointer; }
+  .barrier-row__box {
+    font-family: 'Courier New', Courier, monospace; font-size: 18px; letter-spacing: 1px;
+    display: inline-flex; align-items: center; gap: 4px; color: var(--color-black);
+  }
+  .barrier-row__box .dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; }
+  .barrier-row.is-checked .barrier-row__box .dot { background: var(--color-primary); }
+  .barrier-row__label { font-family: var(--font-body); font-size: 18px; }
+
+  .barrier-divider { background: var(--color-black); width: 1px; }
+
+  .barrier-detail { display: flex; flex-direction: column; }
+  .barrier-detail__mark { font-family: 'Courier New', Courier, monospace; font-size: 18px; letter-spacing: 1px; margin-bottom: 10px; }
+  .barrier-detail__name { font-family: var(--font-body); font-size: 18px; padding-left: 20px; }
+  .barrier-detail__text { margin-top: auto; font-size: 18px; line-height: 1.45; color: var(--color-black); }
+  .barrier-detail__link { display: block; margin-top: 6px; font-size: 18px; font-style: italic; color: var(--color-primary); text-decoration: none; }
+  .barrier-detail__link:hover { text-decoration: underline; }
+
+  .barrier-rule { border: 0; border-top: 1px solid var(--color-black); margin: 0 0 20px; }
+
+  .synergy-live { display: flex; flex-direction: column; }
+  .synergy-row { display: grid; grid-template-columns: 380px 1fr; column-gap: 40px; margin-bottom: 18px; align-items: start; }
+  .synergy-row__mark { font-family: 'Courier New', Courier, monospace; font-size: 18px; letter-spacing: 1px; margin-bottom: 4px; }
+  .synergy-row__name { font-family: var(--font-body); font-size: 18px; padding-left: 20px; }
+  .synergy-row__desc { font-size: 18px; line-height: 1.45; color: var(--color-black); }
+
+  .reset-btn-row { display: flex; justify-content: flex-end; }
+  .reset-btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 4px 0; text-align: center; font-family: var(--font-body); font-size: 18px;
+    background: none; color: var(--color-black); border: 0; cursor: pointer;
+  }
+
+  /* ---- Results (step 3) ---- */
+
+  .result-columns { display: grid; grid-template-columns: 1fr 1px 1fr; column-gap: 32px; margin-bottom: 16px; }
+  .result-divider { background: var(--color-black); width: 1px; }
+  .result-col__label { font-size: 18px; color: var(--color-black); margin-bottom: 10px; }
+
+  .result-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+  .result-row__mark {
+    font-family: 'Courier New', Courier, monospace; font-size: 18px; letter-spacing: 1px;
+    display: inline-flex; align-items: center; gap: 4px; color: var(--color-black);
+  }
+  .result-row__mark .dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; background: var(--color-primary); }
+  .result-row__label { font-family: var(--font-body); font-size: 18px; flex: 1 1 auto; }
+  .result-row__pct { font-family: var(--font-body); font-size: 18px; }
+
+  .result-empty { font-size: 18px; color: var(--color-gray-text); margin: 0; }
+
+  .result-event-mark { font-family: 'Courier New', Courier, monospace; font-size: 18px; letter-spacing: 1px; margin-bottom: 6px; }
+  .result-event-name-line { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+  .result-event-name { font-family: var(--font-body); font-size: 18px; padding-left: 20px; }
+
+  .result-desc { font-size: 18px; line-height: 1.45; color: var(--color-black); margin: 0 0 10px; }
+
+  .result-rule { border: 0; border-top: 1px solid var(--color-black); margin: 18px 0 0; }
+
+  .result-subtotals {
+    display: grid; grid-template-columns: 1fr 1px 1fr; column-gap: 32px;
+    font-family: var(--font-body); font-size: 18px; padding: 10px 0;
+  }
+  .result-subtotals span:first-child { text-align: right; }
+  .result-subtotals span:last-child { text-align: right; }
+
+  .result-total-row, .result-final-row {
+    display: flex; justify-content: space-between; font-family: var(--font-body); font-size: 18px; padding: 4px 0;
+  }
+  .result-final-row { font-weight: 700; padding: 8px 0; }
+
+  .result-band { display: grid; grid-template-columns: 1fr 1px 1fr; column-gap: 32px; margin-top: 20px; align-items: baseline; }
+  .result-band__mark { font-family: 'Courier New', Courier, monospace; font-size: 18px; letter-spacing: 1px; margin-left: 130px; }
+  .result-band__desc { font-size: 18px; color: var(--color-black); max-width: 560px; }
+
+  .result-links-row { display: grid; grid-template-columns: 1fr 1px 1fr; column-gap: 32px; margin-top: 24px; }
+  .results__links { display: flex; flex-direction: column; gap: 8px; }
+  .barrier__link {
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    font-size: 18px; font-style: normal; color: var(--color-primary); text-decoration: none;
+  }
+  .barrier__link:hover { text-decoration: underline; }
+  .barrier__link .link-arrow { flex: 0 0 auto; }
+
+  @media (max-width: 900px) {
+    .pathway-grid { grid-template-columns: 1fr; row-gap: 24px; }
+    .result-columns { grid-template-columns: 1fr; row-gap: 20px; }
+    .result-columns .result-divider { display: none; }
+    .result-subtotals { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="calc">
+    <!-- STEP 1: Pathway -->
+    <section class="step is-active" data-step="1">
+      <div class="pathway-page">
+        <div class="pathway-heading-row">
+          <div class="pathway-heading">Choose a training pathway</div>
+          <button type="button" class="pathway-next-btn" id="pathwayNextBtn" aria-label="Continue to barriers"></button>
+        </div>
+        <div class="pathway-grid" id="pathwayGrid">
+          <div class="pathway-option" data-pathway="associate">
+            <div class="pathway-option__row">
+              <span class="pathway-option__box">[<span class="dot"></span>]</span>
+              <span class="pathway-option__label">Associate Degree</span>
+            </div>
+            <p class="pathway-option__summary">High susceptibility to Spatial Mismatch and Foundational Skills Gap.</p>
+          </div>
+          <div class="pathway-option" data-pathway="cte">
+            <div class="pathway-option__row">
+              <span class="pathway-option__box">[<span class="dot"></span>]</span>
+              <span class="pathway-option__label">CTE</span>
+            </div>
+            <p class="pathway-option__summary">High susceptibility to Transit and Childcare.</p>
+          </div>
+          <div class="pathway-option" data-pathway="apprenticeship">
+            <div class="pathway-option__row">
+              <span class="pathway-option__box">[<span class="dot"></span>]</span>
+              <span class="pathway-option__label">Apprenticeship</span>
+            </div>
+            <p class="pathway-option__summary">High susceptibility to Legal Restrictions and Transit.</p>
+          </div>
+          <div class="pathway-option" data-pathway="fouryear">
+            <div class="pathway-option__row">
+              <span class="pathway-option__box">[<span class="dot"></span>]</span>
+              <span class="pathway-option__label">Four-Year Degree</span>
+            </div>
+            <p class="pathway-option__summary">High susceptibility to Foundational Skills Gap and Financial Opportunity Cost.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- STEP 2: Barriers -->
+    <section class="step" data-step="2">
+      <div class="barrier-page">
+        <button type="button" class="pathway-back-btn" id="backLink" style="position:absolute; top:0; left:0;" aria-label="Back to pathway"></button>
+        <button type="button" class="pathway-next-btn" id="step2NextBtn" style="position:absolute; top:0; right:0;" aria-label="Continue to results"></button>
+
+        <div class="barrier-columns">
+          <div class="barrier-left-label">Choose barriers</div>
+          <div class="barrier-list" id="barrierList"></div>
+          <div class="barrier-divider"></div>
+          <div class="barrier-detail">
+            <div class="barrier-detail__mark">[&nbsp;?&nbsp;]</div>
+            <div class="barrier-detail__name" id="barrierDetailName"></div>
+            <p class="barrier-detail__text" id="barrierDetailText">Check a barrier to see how it affects the path.</p>
+          </div>
+        </div>
+
+        <hr class="barrier-rule">
+
+        <div class="synergy-live" id="synergyLive"></div>
+      </div>
+    </section>
+
+    <!-- STEP 3: Result -->
+    <section class="step" data-step="3">
+      <div class="barrier-page">
+        <div id="results"></div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const BARRIERS = [
+      { id: "financial", title: "Financial Opportunity Cost", text: "Training takes time that could be spent earning an immediate salary. While some programs offer a temporary wage, these are often low-paying and short-term. Without personal savings or paid apprenticeships, the loss of income during training creates a barrier to entry." },
+      { id: "transit", title: "Transit and Informal Costs", text: "Training sites are often located far from residences. With limited to no public transportation and no ride-sharing services available, students without cars rely on paying neighbors or family members for rides. This practice acts as a private tax on attendance and makes schedules fragile.", link: { text: "See how this impacted Bobby's training in Section Six.", href: "#chapter-six" } },
+      { id: "childcare", title: "Childcare Access", text: "Reliable care is a prerequisite for consistency in training for young families. The lack of nearby centers functions as a primary driver of student attrition for parents.", link: { text: "See how support networks shaped Deanna's experience in Section Nine.", href: "#chapter-nine" } },
+      { id: "connectivity", title: "Connectivity and Remote Viability", text: "Online training programs and remote jobs require high-speed internet. Lack of stable broadband at home cuts residents off from these opportunities. It forces a reliance on physical travel for tasks that could be done digitally, which exacerbates other transit hurdles." },
+      { id: "foundational", title: "Foundational Skills Gap", text: "Many adult learners have been away from formal education for years. They often require prerequisite math or literacy help before beginning reskilling programs. This necessity adds an extra layer of time and logistics to the training process. During the additional period the likelihood of a life disruption increases, making it harder for the student to persist.", link: { text: "Read about the path Logan navigated in Section Seven.", href: "#chapter-seven" } },
+      { id: "housing", title: "Housing and Infrastructure", text: "Housing insecurity involves more than rent. In many coalfield communities, failing water and sewage systems affect habitability. If a student deals with contaminated water or failing infrastructure in their home, they cannot sustain the focus required for academic work. The physical environment acts as a drag on mental health and physical stamina.", link: { text: "Read about the water infrastructure crisis in Section Ten.", href: "#chapter-ten" } },
+      { id: "health", title: "Health and Wellness", text: "Chronic health conditions and mental health challenges are prevalent in areas with long-term economic decline. Managing these needs while balancing a training schedule is difficult, especially when medical care is located far from home. Minor medical issues often become permanent hurdles to program completion because the system lacks the flexibility to accommodate students with health needs." },
+      { id: "legal", title: "Legal Restrictions", text: "Certain records, particularly those related to substance use or past criminal activity, block access to career paths. These records prevent individuals from obtaining licenses, working in bonded positions, or securing jobs that require federal security clearances.", link: { text: "Learn about the barriers faced by Marqees in Section Eleven.", href: "#chapter-eleven" } },
+      { id: "navigation", title: "Navigation Burden", text: "Securing support for housing, childcare, and training requires managing multiple non-communicating agencies. The labor of coordinating these services falls on the student, acting as a hidden job that must be completed alongside studies. The cognitive load of being an individual case manager is exhausting. Many students drop out not because they cannot learn, but because they run out of energy to manage the bureaucratic friction required to stay in the program." },
+      { id: "stigma", title: "Cultural Stigma", text: "Identity in these communities is often tied to industrial work. Entering a training program or accepting social support can feel like an admission of failure. This stigma often prevents individuals from seeking help early, when a problem is still solvable. By the time a student reaches out for help, their situation has often deteriorated to a point where the hurdles have become insurmountable.", link: { text: "Read about the identity struggle in the Southern Coalfields in Section Three.", href: "#chapter-three" } },
+    ];
+    const barrierTitle = (id) => (BARRIERS.find((b) => b.id === id) || {}).title || id;
+
+    const PATHWAYS = {
+      associate: {
+        label: "Associate Degree Pathway",
+        explain: "High susceptibility to Spatial Mismatch and Foundational Skills Gap. Foundational Skills Gap reduces Persistence Score by 20%. Spatial Mismatch reduces it by an additional 15%. If Connectivity is also lacking, that reduces it by another 10%, since Associate Degrees increasingly rely on hybrid coursework.",
+        modifiers: [ { barrier: "foundational", pct: 20 }, { barrier: "transit", pct: 15 }, { barrier: "connectivity", pct: 10 } ],
+      },
+      apprenticeship: {
+        label: "Apprenticeship Pathway",
+        explain: "High susceptibility to Legal Restrictions and Transit. Legal Restrictions reduce Persistence Score by 25% (due to bonding requirements). Transit reduces it by 20% due to the rigid nature of job-site attendance.",
+        modifiers: [ { barrier: "legal", pct: 25 }, { barrier: "transit", pct: 20 } ],
+      },
+      cte: {
+        label: "CTE Pathway",
+        explain: "High susceptibility to Transit and Childcare. Transit reduces Persistence Score by 25%. Childcare reduces it by 20%.",
+        modifiers: [ { barrier: "transit", pct: 25 }, { barrier: "childcare", pct: 20 } ],
+      },
+      fouryear: {
+        label: "Four-Year Degree Pathway",
+        explain: "High susceptibility to Foundational Skills Gap and Financial Opportunity Cost. Foundational Skills Gap reduces Persistence Score by 30% due to the multi-year commitment. Financial Opportunity Cost reduces it by 20% due to the high risk of non-completion. If Connectivity is also lacking, that reduces it by another 10%.",
+        modifiers: [ { barrier: "foundational", pct: 30 }, { barrier: "financial", pct: 20 }, { barrier: "connectivity", pct: 10 } ],
+      },
+    };
+
+    const SYNERGIES = [
+      { barriers: ["navigation", "connectivity"], name: "The Information Vacuum", desc: "Without home internet, students cannot research available programs. They navigate bureaucracies blind, relying on word of mouth rather than accurate data." },
+      { barriers: ["stigma", "foundational"], name: "The Identity Barrier", desc: "When academic skill gaps are paired with the cultural stigma of returning to education, individuals become more likely to forego retraining." },
+      { barriers: ["navigation", "transit"], name: "The Coordination Gap", desc: "When a student lacks both a clear map of how to apply for aid and transportation to ask questions in person, the ability to access programs becomes a strong deterrent." },
+      { barriers: ["housing", "foundational"], name: "The Focus Drain", desc: "Academic retention requires high cognitive load. When home infrastructure fails, students experience stress, making it harder to bridge skill gaps that require sustained, focused effort." },
+      { barriers: ["legal", "foundational"], name: "The Opportunity Ceiling", desc: "A legal record can block entry into available jobs, while a foundational skills gap increases the difficulty of training for something less restrictive." },
+      { barriers: ["financial", "housing"], name: "The Survival Choice", desc: "When training wages are low and housing is unstable, students are forced to prioritize immediate income over long-term skill acquisition." },
+      { barriers: ["transit", "childcare", "connectivity"], name: "The Spatial Lockdown", desc: "If you have no ride, no childcare, and no internet to find alternatives, you are effectively locked into your immediate physical location. This prevents any participation in hybrid or remote workforce models." },
+      { barriers: ["navigation", "health", "stigma"], name: "The Disengagement Loop", desc: "A student with a new health condition feels the shame of being without work, struggles to navigate the bureaucracy, and without adequate supports drops out of training." },
+    ];
+
+    const LIFE_EVENTS = [
+      { id: "childbirth", name: "Childbirth", adds: ["childcare", "foundational"], desc: "A new baby adds Childcare Access as a barrier, plus Foundational Skills Gap from the lost time." },
+      { id: "job_loss", name: "Family Member Job Loss", adds: ["financial", "navigation"], desc: "A household income disappears, adding Financial Opportunity Cost, plus Navigation Burden as the household tries to find new aid." },
+      { id: "eviction", name: "Eviction", adds: ["housing", "health"], desc: "Losing housing adds Housing and Infrastructure as a barrier, plus Health and Wellness from the mental stress." },
+      { id: "illness", name: "New Illness or Diagnosis", adds: ["health", "navigation"], desc: "A new health condition adds Health and Wellness as a barrier, plus Navigation Burden from the search for programs and care." },
+      { id: "relapse", name: "Drug Relapse", adds: ["legal", "health", "stigma"], desc: "A relapse adds Legal Restrictions, Health and Wellness, and Cultural Stigma all at once." },
+    ];
+
+    let selectedPathway = null;
+    let currentStep = 1;
+    let lastLifeEvent = null;
+    let lastSelectedBarrierId = null;
+
+    // ---- Build barrier checklist ----
+    const listEl = document.getElementById("barrierList");
+    BARRIERS.forEach((b) => {
+      const row = document.createElement("div");
+      row.className = "barrier-row";
+      row.dataset.barrierId = b.id;
+      row.innerHTML = `
+        <span class="barrier-row__box">[<span class="dot"></span>]</span>
+        <span class="barrier-row__label">${b.title}</span>
+      `;
+      listEl.appendChild(row);
+      row.addEventListener("click", () => {
+        row.classList.toggle("is-checked");
+        lastSelectedBarrierId = b.id;
+        updateBarrierDetail(b.id);
+        recalcPreview();
+        updateStep2NextBtn();
+      });
+    });
+
+    function updateStep2NextBtn() {
+      document.getElementById("step2NextBtn").classList.toggle("is-visible", getCheckedIds().length > 0);
+    }
+
+    function updateBarrierDetail(id) {
+      const b = BARRIERS.find((x) => x.id === id);
+      if (!b) return;
+      document.getElementById("barrierDetailName").textContent = "( " + b.title + " )";
+      const textEl = document.getElementById("barrierDetailText");
+      textEl.innerHTML = b.text + (b.link ? `<a class="barrier-detail__link" href="${b.link.href}">${b.link.text}</a>` : "");
+    }
+
+    // ---- Pathway selector (step 1) ----
+    document.querySelectorAll(".pathway-option").forEach((opt) => {
+      opt.addEventListener("click", () => {
+        document.querySelectorAll(".pathway-option").forEach((o) => o.classList.remove("is-selected"));
+        opt.classList.add("is-selected");
+        selectedPathway = opt.dataset.pathway;
+        document.getElementById("pathwayNextBtn").classList.add("is-visible");
+      });
+    });
+
+    function getCheckedIds() {
+      return BARRIERS.filter((b) => {
+        const row = document.querySelector('.barrier-row[data-barrier-id="' + b.id + '"]');
+        return row && row.classList.contains("is-checked");
+      }).map((b) => b.id);
+    }
+
+    function detectSynergies(activeIds) {
+      return SYNERGIES.filter((s) => s.barriers.every((b) => activeIds.includes(b)));
+    }
+
+    function bandFor(score) {
+      if (score >= 80) return { status: "Stable", desc: "Success is probable with individual effort." };
+      if (score >= 50) return { status: "Friction High", desc: "Persistence is threatened; systemic support is required to ensure success." };
+      return { status: "Systemic Exclusion", desc: "The training program is unlikely to result in completion without comprehensive wraparound services." };
+    }
+
+    function computeScore(activeIds, pathwayKey, lifeEvent) {
+      let score = 100;
+      const breakdown = [];
+      const barrierRows = [];
+      const pathwayRows = [];
+
+      activeIds.forEach((id) => {
+        score -= 5;
+        barrierRows.push({ id, title: barrierTitle(id), pct: 5 });
+      });
+      if (activeIds.length) {
+        breakdown.push({ label: activeIds.length + " barrier" + (activeIds.length > 1 ? "s" : "") + " toggled (−5% each)", pct: activeIds.length * 5 });
+      }
+
+      if (pathwayKey && PATHWAYS[pathwayKey]) {
+        PATHWAYS[pathwayKey].modifiers.forEach((m) => {
+          if (activeIds.includes(m.barrier)) {
+            score -= m.pct;
+            pathwayRows.push({ barrier: m.barrier, title: barrierTitle(m.barrier), pct: m.pct });
+            breakdown.push({ label: PATHWAYS[pathwayKey].label + " susceptibility — " + barrierTitle(m.barrier), pct: m.pct });
+          }
+        });
+      }
+
+      const synergies = detectSynergies(activeIds);
+      synergies.forEach((s) => {
+        score -= 5;
+        breakdown.push({ label: "Synergy — " + s.name, pct: 5, desc: s.desc });
+      });
+
+      if (lifeEvent) {
+        score -= 15;
+        breakdown.push({ label: "Life event — " + lifeEvent.name, pct: 15, desc: lifeEvent.desc });
+      }
+
+      score = Math.max(0, Math.min(100, score));
+      return { score, breakdown, synergies, barrierRows, pathwayRows };
+    }
+
+    function renderSynergyLive(synergies) {
+      const el = document.getElementById("synergyLive");
+      if (!synergies.length) { el.innerHTML = ""; return; }
+      el.innerHTML = synergies.map((s) => `
+        <div class="synergy-row">
+          <div>
+            <div class="synergy-row__mark">[&nbsp;*&nbsp;]</div>
+            <div class="synergy-row__name">( ${s.name} )</div>
+          </div>
+          <div class="synergy-row__desc">${s.desc}</div>
+        </div>
+      `).join("");
+    }
+
+    function recalcPreview() {
+      const checked = getCheckedIds();
+      const { synergies } = computeScore(checked, selectedPathway, null);
+      renderSynergyLive(synergies);
+    }
+
+    // ---- Step navigation ----
+    function goToStep(n) {
+      currentStep = n;
+      document.querySelectorAll(".step").forEach((s) => s.classList.toggle("is-active", Number(s.dataset.step) === n));
+
+      if (n === 2) {
+        recalcPreview();
+        updateStep2NextBtn();
+      }
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    document.getElementById("pathwayNextBtn").addEventListener("click", () => {
+      if (!selectedPathway) return;
+      goToStep(2);
+    });
+
+    document.getElementById("backLink").addEventListener("click", (e) => {
+      e.preventDefault();
+      goToStep(1);
+    });
+
+    document.getElementById("step2NextBtn").addEventListener("click", () => {
+      lastLifeEvent = LIFE_EVENTS[Math.floor(Math.random() * LIFE_EVENTS.length)];
+
+      const checked = getCheckedIds();
+      const activeIds = Array.from(new Set(checked.concat(lastLifeEvent.adds)));
+      const { score, synergies, barrierRows, pathwayRows } = computeScore(activeIds, selectedPathway, lastLifeEvent);
+      const band = bandFor(score);
+
+      const checkedRows = barrierRows.filter((r) => checked.includes(r.id));
+      const addedRows = barrierRows.filter((r) => lastLifeEvent.adds.includes(r.id));
+      const linked = activeIds.map((id) => BARRIERS.find((b) => b.id === id)).filter((b) => b && b.link);
+
+      const leftSubtotal = pathwayRows.reduce((sum, r) => sum + r.pct, 0) + checkedRows.reduce((sum, r) => sum + r.pct, 0);
+      const rightSubtotal = 15 + addedRows.reduce((sum, r) => sum + r.pct, 0) + synergies.length * 5;
+      const totalDeduction = leftSubtotal + rightSubtotal;
+
+      const rowHTML = (title, pct) => `
+        <div class="result-row">
+          <span class="result-row__mark">[<span class="dot"></span>]</span>
+          <span class="result-row__label">${title}</span>
+          <span class="result-row__pct">${pct}%</span>
+        </div>
+      `;
+
+      const rowHTMLPlain = (title) => `
+        <div class="result-row">
+          <span class="result-row__mark">[<span class="dot"></span>]</span>
+          <span class="result-row__label">${title}</span>
+        </div>
+      `;
+
+      document.getElementById("results").innerHTML = `
+        <div class="result-columns">
+          <div class="result-col">
+            <div class="result-col__label">Pathway</div>
+            <p class="result-desc">${PATHWAYS[selectedPathway].explain}</p>
+            ${pathwayRows.length ? pathwayRows.map((r) => rowHTML(r.title, r.pct)).join("") : `<p class="result-empty">No pathway-specific barriers triggered.</p>`}
+
+            <div class="result-col__label" style="margin-top:40px;">Barriers</div>
+            ${checkedRows.length ? checkedRows.map((r) => rowHTML(r.title, r.pct)).join("") : `<p class="result-empty">No barriers were checked.</p>`}
+          </div>
+
+          <div class="result-divider"></div>
+
+          <div class="result-col">
+            <div class="result-event-mark">[&nbsp;!&nbsp;]</div>
+            <div class="result-event-name-line">
+              <span class="result-event-name">( ${lastLifeEvent.name} )</span>
+              <span class="result-row__pct">15%</span>
+            </div>
+            <div class="result-col__label">Life Event</div>
+            <p class="result-desc">${lastLifeEvent.desc}</p>
+            ${addedRows.map((r) => rowHTML(r.title, r.pct)).join("")}
+
+            ${synergies.map((s) => `
+              <div class="result-event-mark" style="margin-top:40px;">[&nbsp;*&nbsp;]</div>
+              <div class="result-event-name-line">
+                <span class="result-event-name">( ${s.name} )</span>
+                <span class="result-row__pct">5%</span>
+              </div>
+              <div class="result-col__label">Synergy</div>
+              <p class="result-desc">${s.desc}</p>
+              ${s.barriers.map((id) => rowHTMLPlain(barrierTitle(id))).join("")}
+            `).join("")}
+          </div>
+        </div>
+
+        <hr class="result-rule">
+        <div class="result-subtotals">
+          <span>${leftSubtotal}%</span>
+          <span></span>
+          <span>${rightSubtotal}%</span>
+        </div>
+        <div class="result-total-row">
+          <span>Total</span>
+          <span>−${totalDeduction}%</span>
+        </div>
+        <hr class="result-rule">
+        <div class="result-final-row">
+          <span>Result</span>
+          <span>${score}%</span>
+        </div>
+
+        <div class="result-band">
+          <div class="result-band__mark">[&nbsp;${band.status}&nbsp;]</div>
+          <div></div>
+          <div class="result-band__desc">${band.desc}</div>
+        </div>
+
+        ${linked.length ? `
+          <div class="result-links-row">
+            <div></div>
+            <div></div>
+            <div class="results__links">
+              ${linked.map((b) => `<a class="barrier__link" href="${b.link.href}"><span>${b.link.text}</span><span class="link-arrow">↗</span></a>`).join("")}
+            </div>
+          </div>
+        ` : ""}
+
+        <div class="reset-btn-row" style="margin-top:24px;">
+          <button type="button" class="reset-btn" id="step3Btn"><span class="result-row__mark">[<span class="dot"></span>]</span>Start over</button>
+        </div>
+      `;
+
+      document.querySelectorAll(".barrier-row, .pathway-option").forEach((el) => {
+        el.style.pointerEvents = "none";
+        el.style.opacity = "0.6";
+      });
+
+      document.getElementById("step3Btn").addEventListener("click", () => location.reload());
+
+      goToStep(3);
+    });
+
+    goToStep(1);
+  </script>
+</body>
+</html>
